@@ -2,7 +2,7 @@
 
 import math
 import os
-from random import randint
+from random import randint, random
 from collections import deque
 import numpy as np
 import pickle
@@ -10,6 +10,7 @@ import pygame
 from pygame.locals import *
 from scipy.ndimage.filters import gaussian_filter
 import time
+from enum import Enum
 
 FPS = 60
 ANIMATION_SPEED = 0.18  # pixels per millisecond
@@ -311,45 +312,79 @@ def msec_to_frames(milliseconds, fps=FPS):
     return fps * milliseconds / 1000.0
 
 
+class Action:
+    STILL = 0
+    JUMP = 1
+
+
 class Actor:
-    step_r = Bird.HEIGHT / 10
-    step_c = Bird.WIDTH / 10
+    step_r = Bird.HEIGHT / 5
+    step_c = Bird.WIDTH / 5
+    step_m = 5
+
+    print(Bird.HEIGHT, Bird.WIDTH)
+    print(step_r, step_c)
+
     alpha = .9
 
     def __init__(self, bird):
         self.bird = bird
         # Initialize array with 50 payoffs initially
-        self.Q = np.full((2, (WIN_HEIGHT / Actor.step_r) * 2, (WIN_WIDTH / Actor.step_c) * 2), 5, dtype=np.double)
+
+        actions = 2
+        height = (WIN_HEIGHT / Actor.step_r) * 2
+        width = (WIN_WIDTH / Actor.step_c) * 2
+        msecs = (333.33 / Actor.step_m) * 2
+
+        self.Q = np.full((actions, height, width, msecs), 0, dtype=np.double)
         print(self.Q.shape)
 
     def act(self, state):
-        row, col = self._state_index(state)
-        action = 0
+        row, col, moc = self._state_index(state)
 
-        # Consult the Q matrix and pick the action that has the highest
-        if self.Q[0, row, col] < self.Q[1, row, col]:
-            action = 1
+        chance_to_rand = 50
+        chance_to_jump = 5
+
+        if randint(0, 100) < chance_to_rand:
+            if randint(0, 100) < chance_to_jump:
+                action = 1
+            else:
+                action = 0
+
+        else:
+            # Consult the Q matrix and pick the action that has the highest
+            if self.Q[Action.STILL, row, col, moc] < self.Q[Action.JUMP, row, col, moc]:
+                action = Action.JUMP
+            else:
+                action = Action.STILL
+
+        if action == Action.JUMP:
             self.bird.jump()
 
         return action
 
     def learn(self, state_a, state_b, action, reward):
         # Consult the matrix and adjust the value at the appropriate position
-        row_a, col_a = self._state_index(state_a)
-        row_b, col_b = self._state_index(state_b)
+        row_a, col_a, moc_a = self._state_index(state_a)
+        row_b, col_b, moc_b = self._state_index(state_b)
 
-        self.Q[action, row_a, col_a] = (Actor.alpha * reward) + ((1 - Actor.alpha) * max(self.Q[:, row_b, col_b]))
+        self.Q[action, row_a, col_a, moc_a] = (Actor.alpha * reward) + ((1 - Actor.alpha) * max(self.Q[:, row_b, col_b, moc_b]))
 
         # perform a gaussian smoothing
         # self._guassian_smooth()
 
     def _state_index(self, state):
-        delta_x, delta_y = state
+        delta_x, delta_y, msec_to_drop = state
 
-        actions, height, width = self.Q.shape
-        return int(height/2) + int(delta_y / Actor.step_r), int(width/2) + int(delta_x / Actor.step_c)
+        actions, height, width, msecs = self.Q.shape
 
-    def _guassian_smooth(self):
+        row = int(height / 2) + int(delta_y / Actor.step_r)
+        col = int(width / 2) + int(delta_x / Actor.step_c)
+        moc = int(msecs / 2) + int(self.bird.msec_to_climb / Actor.step_m)
+
+        return row, col, moc
+
+    def gaussian_smooth(self):
         self.Q = gaussian_filter(self.Q, sigma=2)
 
 
@@ -401,7 +436,8 @@ def main():
             next_pipe = pipes[0]
             delta_x = bird.x - next_pipe.x
             bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
-            state_a = (delta_x, bottom_delta_y)
+
+            state_a = (delta_x, bottom_delta_y, bird.msec_to_climb)
             action = actor.act(state_a)
             #####################################################
 
@@ -414,7 +450,7 @@ def main():
 
                 elif e.type == KEYUP and e.key is K_s:
                     print('{}- Writing actor to file'.format(time.strftime("%I:%M:%S")))
-                    with open('actor.pickle', 'wb') as handle:
+                    with open('old.pickle', 'wb') as handle:
                         pickle.dump(actor.Q, handle)
 
                 elif e.type == MOUSEBUTTONUP or (e.type == KEYUP and e.key in (K_UP, K_RETURN, K_SPACE)):
@@ -442,7 +478,7 @@ def main():
             bird.update()
             delta_x = bird.x - next_pipe.x
             bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
-            state_b = (delta_x, bottom_delta_y)
+            state_b = (delta_x, bottom_delta_y, bird.msec_to_climb)
 
             if bird.dead:
                 reward = -1000
