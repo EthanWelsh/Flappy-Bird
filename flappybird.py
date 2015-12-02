@@ -5,9 +5,11 @@ import os
 from random import randint
 from collections import deque
 import numpy as np
+import pickle
 import pygame
 from pygame.locals import *
 from scipy.ndimage.filters import gaussian_filter
+import time
 
 FPS = 60
 ANIMATION_SPEED = 0.18  # pixels per millisecond
@@ -317,7 +319,7 @@ class Actor:
     def __init__(self, bird):
         self.bird = bird
         # Initialize array with 50 payoffs initially
-        self.Q = np.full((2, (WIN_HEIGHT / Actor.step_r) * 2, (WIN_WIDTH / Actor.step_c) * 2), 5)
+        self.Q = np.full((2, (WIN_HEIGHT / Actor.step_r) * 2, (WIN_WIDTH / Actor.step_c) * 2), 5, dtype=np.double)
         print(self.Q.shape)
 
     def act(self, state):
@@ -329,18 +331,12 @@ class Actor:
             action = 1
             self.bird.jump()
 
-        print(action)
-
         return action
 
     def learn(self, state_a, state_b, action, reward):
         # Consult the matrix and adjust the value at the appropriate position
         row_a, col_a = self._state_index(state_a)
         row_b, col_b = self._state_index(state_b)
-
-        #print(action, row_a, col_a)
-        #print(self.Q[action, row_a, col_a])
-        print(self.Q.min())
 
         self.Q[action, row_a, col_a] = (Actor.alpha * reward) + ((1 - Actor.alpha) * max(self.Q[:, row_b, col_b]))
 
@@ -375,8 +371,14 @@ def main():
 
     # the bird stays in the same x position, so bird.x is a constant
     # center bird on screen
+
     bird = Bird(50, int(WIN_HEIGHT / 2 - Bird.HEIGHT / 2), 2, (images['bird-wingup'], images['bird-wingdown']))
     actor = Actor(bird)
+
+    if os.path.exists('actor.pickle'):
+        print('Reading actor from file.')
+        with open('actor.pickle', 'rb') as handle:
+            actor.Q = pickle.load(handle)
 
     while True:
         bird = Bird(50, int(WIN_HEIGHT / 2 - Bird.HEIGHT / 2), 2, (images['bird-wingup'], images['bird-wingdown']))
@@ -409,6 +411,12 @@ def main():
                     break
                 elif e.type == KEYUP and e.key in (K_PAUSE, K_p):
                     paused = not paused
+
+                elif e.type == KEYUP and e.key is K_s:
+                    print('{}- Writing actor to file'.format(time.strftime("%I:%M:%S")))
+                    with open('actor.pickle', 'wb') as handle:
+                        pickle.dump(actor.Q, handle)
+
                 elif e.type == MOUSEBUTTONUP or (e.type == KEYUP and e.key in (K_UP, K_RETURN, K_SPACE)):
                     bird.jump()
 
