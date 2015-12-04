@@ -311,24 +311,50 @@ def msec_to_frames(milliseconds, fps=FPS):
     return fps * milliseconds / 1000.0
 
 
+class Action:
+    STILL = 0
+    JUMP = 1
+
+
 class Actor:
-    step_r = Bird.HEIGHT / 10
-    step_c = Bird.WIDTH / 10
+    step_r = 3
+    step_c = 3
+
     alpha = .9
 
     def __init__(self, bird):
         self.bird = bird
         # Initialize array with 50 payoffs initially
-        self.Q = np.full((2, (WIN_HEIGHT / Actor.step_r) * 2, (WIN_WIDTH / Actor.step_c) * 2), 5, dtype=np.double)
+
+        actions = 2
+        height = (WIN_HEIGHT / Actor.step_r) * 2
+        width = (WIN_WIDTH / Actor.step_c) * 2
+        bird_heights = 3
+        pipe_heights = 3
+
+        self.Q = np.full((actions, height, width, bird_heights, pipe_heights), 0, dtype=np.double)
         print(self.Q.shape)
 
     def act(self, state):
         row, col = self._state_index(state)
-        action = 0
 
-        # Consult the Q matrix and pick the action that has the highest
-        if self.Q[0, row, col] < self.Q[1, row, col]:
-            action = 1
+        chance_to_rand = 50
+        chance_to_jump = 25
+
+        if randint(0, 100) < chance_to_rand:
+            if randint(0, 100) < chance_to_jump:
+                action = Action.JUMP
+            else:
+                action = Action.STILL
+
+        else:
+            # Consult the Q matrix and pick the action that has the highest
+            if self.Q[Action.STILL, row, col] < self.Q[Action.JUMP, row, col]:
+                action = Action.JUMP
+            else:
+                action = Action.STILL
+
+        if action == Action.JUMP:
             self.bird.jump()
 
         return action
