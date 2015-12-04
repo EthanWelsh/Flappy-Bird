@@ -2,7 +2,7 @@
 
 import math
 import os
-from random import randint, random
+from random import randint
 from collections import deque
 import numpy as np
 import pickle
@@ -10,7 +10,6 @@ import pygame
 from pygame.locals import *
 from scipy.ndimage.filters import gaussian_filter
 import time
-from enum import Enum
 
 FPS = 60
 ANIMATION_SPEED = 0.18  # pixels per millisecond
@@ -318,14 +317,11 @@ class Action:
 
 
 class Actor:
-    step_r = Bird.HEIGHT / 5
-    step_c = Bird.WIDTH / 5
-    step_m = 5
-
-    print(Bird.HEIGHT, Bird.WIDTH)
-    print(step_r, step_c)
+    step_r = 3
+    step_c = 3
 
     alpha = .9
+    gamma = .9
 
     def __init__(self, bird):
         self.bird = bird
@@ -334,29 +330,27 @@ class Actor:
         actions = 2
         height = (WIN_HEIGHT / Actor.step_r) * 2
         width = (WIN_WIDTH / Actor.step_c) * 2
-        msecs = (333.33 / Actor.step_m) * 2
+        bird_heights = 3
+        pipe_heights = 3
 
-        self.Q = np.full((actions, height, width, msecs), 0, dtype=np.double)
-        print(self.Q.shape)
+        dimensions = (actions, height, width, bird_heights, pipe_heights)
+
+        self.Q = np.full(dimensions, 0, dtype=np.double)
+        self.V = np.full(dimensions, 1, dtype=np.int)
 
     def act(self, state):
-        row, col, moc = self._state_index(state)
+        row, col, bird_lmh, pipe_lmh = self._state_index(state)
 
-        chance_to_rand = 50
-        chance_to_jump = 5
+        # Consult the Q matrix and pick the action that has the highest
+        still = self.Q[Action.STILL, row, col, bird_lmh, pipe_lmh] + 5/self.V[Action.STILL, row, col, bird_lmh, pipe_lmh]
+        jump = self.Q[Action.JUMP, row, col, bird_lmh, pipe_lmh] + 5/self.V[Action.JUMP, row, col, bird_lmh, pipe_lmh]
 
-        if randint(0, 100) < chance_to_rand:
-            if randint(0, 100) < chance_to_jump:
-                action = 1
-            else:
-                action = 0
-
+        if jump > still:
+            action = Action.JUMP
         else:
-            # Consult the Q matrix and pick the action that has the highest
-            if self.Q[Action.STILL, row, col, moc] < self.Q[Action.JUMP, row, col, moc]:
-                action = Action.JUMP
-            else:
-                action = Action.STILL
+            action = Action.STILL
+
+        self.V[action, row, col, bird_lmh, pipe_lmh] += 1
 
         if action == Action.JUMP:
             self.bird.jump()
@@ -365,26 +359,24 @@ class Actor:
 
     def learn(self, state_a, state_b, action, reward):
         # Consult the matrix and adjust the value at the appropriate position
-        row_a, col_a, moc_a = self._state_index(state_a)
-        row_b, col_b, moc_b = self._state_index(state_b)
+        row_a, col_a, bird_lmh_a, pipe_lmh_a = self._state_index(state_a)
+        row_b, col_b, bird_lmh_b, pipe_lmh_b = self._state_index(state_b)
 
-        self.Q[action, row_a, col_a, moc_a] = (Actor.alpha * reward) + ((1 - Actor.alpha) * max(self.Q[:, row_b, col_b, moc_b]))
+        max_value = max(self.Q[:, row_b, col_b, bird_lmh_b, pipe_lmh_b])
+
+        self.Q[action, row_a, col_a, bird_lmh_a, pipe_lmh_a] = (1 - Actor.alpha) * self.Q[action, row_a, col_a, bird_lmh_a, pipe_lmh_a] + Actor.alpha * (
+            reward + (Actor.gamma * max_value))
 
         # perform a gaussian smoothing
         # self._guassian_smooth()
 
     def _state_index(self, state):
-        delta_x, delta_y, msec_to_drop = state
+        delta_x, delta_y, bird_lmh, pipe_lmh = state
 
-        actions, height, width, msecs = self.Q.shape
+        actions, height, width, _, _ = self.Q.shape
+        return int(height / 2) + int(delta_y / Actor.step_r), int(width / 2) + int(delta_x / Actor.step_c), bird_lmh, pipe_lmh
 
-        row = int(height / 2) + int(delta_y / Actor.step_r)
-        col = int(width / 2) + int(delta_x / Actor.step_c)
-        moc = int(msecs / 2) + int(self.bird.msec_to_climb / Actor.step_m)
-
-        return row, col, moc
-
-    def gaussian_smooth(self):
+    def _guassian_smooth(self):
         self.Q = gaussian_filter(self.Q, sigma=2)
 
 
@@ -409,19 +401,27 @@ def main():
 
     bird = Bird(50, int(WIN_HEIGHT / 2 - Bird.HEIGHT / 2), 2, (images['bird-wingup'], images['bird-wingdown']))
     actor = Actor(bird)
+    pipe_passed_bonus_given = True
 
     if os.path.exists('actor.pickle'):
         print('Reading actor from file.')
         with open('actor.pickle', 'rb') as handle:
-            actor.Q = pickle.load(handle)
+            actor.Q, actor.V = pickle.load(handle)
+
+    score = 0.0
+    runs = 0.0
 
     while True:
+
+        runs += 1
+        print('{0:15}: {1:>15.4f}%'.format(int(runs), (score/runs) * 100))
+
         bird = Bird(50, int(WIN_HEIGHT / 2 - Bird.HEIGHT / 2), 2, (images['bird-wingup'], images['bird-wingdown']))
         actor.bird = bird
 
         pipes = deque()
         frame_clock = 0  # this counter is only incremented if the game isn't paused
-        score = 0
+
         done = paused = False
         while not done:
             clock.tick(FPS)
@@ -432,14 +432,7 @@ def main():
                 pp = PipePair(images['pipe-end'], images['pipe-body'])
                 pipes.append(pp)
 
-            #####################################################
             next_pipe = pipes[0]
-            delta_x = bird.x - next_pipe.x
-            bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
-
-            state_a = (delta_x, bottom_delta_y, bird.msec_to_climb)
-            action = actor.act(state_a)
-            #####################################################
 
             for e in pygame.event.get():
                 if e.type == QUIT or (e.type == KEYUP and e.key == K_ESCAPE):
@@ -450,14 +443,27 @@ def main():
 
                 elif e.type == KEYUP and e.key is K_s:
                     print('{}- Writing actor to file'.format(time.strftime("%I:%M:%S")))
-                    with open('old.pickle', 'wb') as handle:
-                        pickle.dump(actor.Q, handle)
+                    with open('actor.pickle', 'wb') as handle:
+                        pickle.dump((actor.Q, actor.V), handle)
 
                 elif e.type == MOUSEBUTTONUP or (e.type == KEYUP and e.key in (K_UP, K_RETURN, K_SPACE)):
                     bird.jump()
 
             if paused:
                 continue  # don't draw anything
+
+
+            #####################################################
+            delta_x = bird.x - next_pipe.x
+            bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
+
+            bird_lmh = int(bird.y/(WIN_HEIGHT/3))
+            pipe_lmh = int(next_pipe.bottom_pipe_end_y/(WIN_HEIGHT/3))
+            state_a = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh)
+
+            if frame_clock % 15 == 0:
+                action = actor.act(state_a)
+            #####################################################
 
             # check for collisions
             pipe_collision = any(p.collides_with(bird) for p in pipes)
@@ -470,22 +476,36 @@ def main():
 
             while pipes and not pipes[0].visible:
                 pipes.popleft()
+                pipe_passed_bonus_given = False
 
             for p in pipes:
                 p.update()
                 display_surface.blit(p.image, p.rect)
 
             bird.update()
+
+            #####################################################
             delta_x = bird.x - next_pipe.x
             bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
-            state_b = (delta_x, bottom_delta_y, bird.msec_to_climb)
 
-            if bird.dead:
+            bird_lmh = int(bird.y/(WIN_HEIGHT/3))
+            pipe_lmh = int(next_pipe.bottom_pipe_end_y/(WIN_HEIGHT/3))
+
+            state_b = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh)
+
+            if bird.y < 0 or bird.y > WIN_HEIGHT:  # Reward for hitting top/bottom & dying
+                reward = -5000
+            elif bird.dead:  # Hitting pipe & dying
                 reward = -1000
+            elif delta_x < 0 and not pipe_passed_bonus_given:
+                pipe_passed_bonus_given = True
+                reward = 10000
             else:
                 reward = 1
 
-            actor.learn(state_a, state_b, action, reward)
+            if frame_clock % 15 == 0:
+                actor.learn(state_a, state_b, action, reward)
+            #####################################################
 
             display_surface.blit(bird.image, bird.rect)
 
