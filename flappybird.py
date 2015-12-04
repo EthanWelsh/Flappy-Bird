@@ -336,26 +336,21 @@ class Actor:
         dimensions = (actions, height, width, bird_heights, pipe_heights)
 
         self.Q = np.full(dimensions, 0, dtype=np.double)
-        print(self.Q.shape)
+        self.V = np.full(dimensions, 1, dtype=np.int)
 
     def act(self, state):
         row, col, bird_lmh, pipe_lmh = self._state_index(state)
 
-        chance_to_rand = 50
-        chance_to_jump = 25
+        # Consult the Q matrix and pick the action that has the highest
+        still = self.Q[Action.STILL, row, col, bird_lmh, pipe_lmh] + 5/self.V[Action.STILL, row, col, bird_lmh, pipe_lmh]
+        jump = self.Q[Action.JUMP, row, col, bird_lmh, pipe_lmh] + 5/self.V[Action.JUMP, row, col, bird_lmh, pipe_lmh]
 
-        if randint(0, 100) < chance_to_rand:
-            if randint(0, 100) < chance_to_jump:
-                action = Action.JUMP
-            else:
-                action = Action.STILL
-
+        if jump > still:
+            action = Action.JUMP
         else:
-            # Consult the Q matrix and pick the action that has the highest
-            if self.Q[Action.STILL, row, col, bird_lmh, pipe_lmh] < self.Q[Action.JUMP, row, col, bird_lmh, pipe_lmh]:
-                action = Action.JUMP
-            else:
-                action = Action.STILL
+            action = Action.STILL
+
+        self.V[action, row, col, bird_lmh, pipe_lmh] += 1
 
         if action == Action.JUMP:
             self.bird.jump()
@@ -367,8 +362,10 @@ class Actor:
         row_a, col_a, bird_lmh_a, pipe_lmh_a = self._state_index(state_a)
         row_b, col_b, bird_lmh_b, pipe_lmh_b = self._state_index(state_b)
 
+        max_value = max(self.Q[:, row_b, col_b, bird_lmh_b, pipe_lmh_b])
+
         self.Q[action, row_a, col_a, bird_lmh_a, pipe_lmh_a] = (1 - Actor.alpha) * self.Q[action, row_a, col_a, bird_lmh_a, pipe_lmh_a] + Actor.alpha * (
-            reward + (Actor.gamma * max(self.Q[:, row_b, col_b, bird_lmh_b, pipe_lmh_b])))
+            reward + (Actor.gamma * max_value))
 
         # perform a gaussian smoothing
         # self._guassian_smooth()
@@ -409,7 +406,7 @@ def main():
     if os.path.exists('actor.pickle'):
         print('Reading actor from file.')
         with open('actor.pickle', 'rb') as handle:
-            actor.Q = pickle.load(handle)
+            actor.Q, actor.V = pickle.load(handle)
 
     score = 0.0
     runs = 0.0
@@ -447,7 +444,7 @@ def main():
                 elif e.type == KEYUP and e.key is K_s:
                     print('{}- Writing actor to file'.format(time.strftime("%I:%M:%S")))
                     with open('actor.pickle', 'wb') as handle:
-                        pickle.dump(actor.Q, handle)
+                        pickle.dump((actor.Q, actor.V), handle)
 
                 elif e.type == MOUSEBUTTONUP or (e.type == KEYUP and e.key in (K_UP, K_RETURN, K_SPACE)):
                     bird.jump()
