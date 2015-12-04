@@ -321,6 +321,7 @@ class Actor:
     step_c = 3
 
     alpha = .9
+    gamma = .9
 
     def __init__(self, bird):
         self.bird = bird
@@ -332,11 +333,13 @@ class Actor:
         bird_heights = 3
         pipe_heights = 3
 
-        self.Q = np.full((actions, height, width, bird_heights, pipe_heights), 0, dtype=np.double)
+        dimensions = (actions, height, width, bird_heights, pipe_heights)
+
+        self.Q = np.full(dimensions, 0, dtype=np.double)
         print(self.Q.shape)
 
     def act(self, state):
-        row, col = self._state_index(state)
+        row, col, bird_lmh, pipe_lmh = self._state_index(state)
 
         chance_to_rand = 50
         chance_to_jump = 25
@@ -349,7 +352,7 @@ class Actor:
 
         else:
             # Consult the Q matrix and pick the action that has the highest
-            if self.Q[Action.STILL, row, col] < self.Q[Action.JUMP, row, col]:
+            if self.Q[Action.STILL, row, col, bird_lmh, pipe_lmh] < self.Q[Action.JUMP, row, col, bird_lmh, pipe_lmh]:
                 action = Action.JUMP
             else:
                 action = Action.STILL
@@ -361,19 +364,20 @@ class Actor:
 
     def learn(self, state_a, state_b, action, reward):
         # Consult the matrix and adjust the value at the appropriate position
-        row_a, col_a = self._state_index(state_a)
-        row_b, col_b = self._state_index(state_b)
+        row_a, col_a, bird_lmh_a, pipe_lmh_a = self._state_index(state_a)
+        row_b, col_b, bird_lmh_b, pipe_lmh_b = self._state_index(state_b)
 
-        self.Q[action, row_a, col_a] = (Actor.alpha * reward) + ((1 - Actor.alpha) * max(self.Q[:, row_b, col_b]))
+        self.Q[action, row_a, col_a, bird_lmh_a, pipe_lmh_a] = (1 - Actor.alpha) * self.Q[action, row_a, col_a, bird_lmh_a, pipe_lmh_a] + Actor.alpha * (
+            reward + (Actor.gamma * max(self.Q[:, row_b, col_b, bird_lmh_b, pipe_lmh_b])))
 
         # perform a gaussian smoothing
         # self._guassian_smooth()
 
     def _state_index(self, state):
-        delta_x, delta_y = state
+        delta_x, delta_y, bird_lmh, pipe_lmh = state
 
-        actions, height, width = self.Q.shape
-        return int(height/2) + int(delta_y / Actor.step_r), int(width/2) + int(delta_x / Actor.step_c)
+        actions, height, width, _, _ = self.Q.shape
+        return int(height / 2) + int(delta_y / Actor.step_r), int(width / 2) + int(delta_x / Actor.step_c), bird_lmh, pipe_lmh
 
     def _guassian_smooth(self):
         self.Q = gaussian_filter(self.Q, sigma=2)
@@ -400,19 +404,27 @@ def main():
 
     bird = Bird(50, int(WIN_HEIGHT / 2 - Bird.HEIGHT / 2), 2, (images['bird-wingup'], images['bird-wingdown']))
     actor = Actor(bird)
+    pipe_passed_bonus_given = True
 
     if os.path.exists('actor.pickle'):
         print('Reading actor from file.')
         with open('actor.pickle', 'rb') as handle:
             actor.Q = pickle.load(handle)
 
+    score = 0.0
+    runs = 0.0
+
     while True:
+
+        runs += 1
+        print(score/runs)
+
         bird = Bird(50, int(WIN_HEIGHT / 2 - Bird.HEIGHT / 2), 2, (images['bird-wingup'], images['bird-wingdown']))
         actor.bird = bird
 
         pipes = deque()
         frame_clock = 0  # this counter is only incremented if the game isn't paused
-        score = 0
+
         done = paused = False
         while not done:
             clock.tick(FPS)
@@ -423,13 +435,7 @@ def main():
                 pp = PipePair(images['pipe-end'], images['pipe-body'])
                 pipes.append(pp)
 
-            #####################################################
             next_pipe = pipes[0]
-            delta_x = bird.x - next_pipe.x
-            bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
-            state_a = (delta_x, bottom_delta_y)
-            action = actor.act(state_a)
-            #####################################################
 
             for e in pygame.event.get():
                 if e.type == QUIT or (e.type == KEYUP and e.key == K_ESCAPE):
@@ -449,6 +455,18 @@ def main():
             if paused:
                 continue  # don't draw anything
 
+
+            #####################################################
+            delta_x = bird.x - next_pipe.x
+            bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
+
+            bird_lmh = int(bird.y/(WIN_HEIGHT/3))
+            pipe_lmh = int(next_pipe.bottom_pipe_end_y/(WIN_HEIGHT/3))
+            state_a = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh)
+
+            action = actor.act(state_a)
+            #####################################################
+
             # check for collisions
             pipe_collision = any(p.collides_with(bird) for p in pipes)
             if pipe_collision or 0 >= bird.y or bird.y >= WIN_HEIGHT - Bird.HEIGHT:
@@ -460,22 +478,38 @@ def main():
 
             while pipes and not pipes[0].visible:
                 pipes.popleft()
+                pipe_passed_bonus_given = False
 
             for p in pipes:
                 p.update()
                 display_surface.blit(p.image, p.rect)
 
             bird.update()
+
+            #####################################################
             delta_x = bird.x - next_pipe.x
             bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
-            state_b = (delta_x, bottom_delta_y)
 
-            if bird.dead:
+            bird_lmh = int(bird.y/(WIN_HEIGHT/3))
+            pipe_lmh = int(next_pipe.bottom_pipe_end_y/(WIN_HEIGHT/3))
+
+            state_b = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh)
+
+            if bird.y < 0 or bird.y > WIN_HEIGHT:  # Reward for hitting top/bottom & dying
+                reward = -5000
+            elif bird.dead:  # Hitting pipe & dying
                 reward = -1000
+            elif delta_x < 0 and not pipe_passed_bonus_given:
+                print("PIPE PASSED")
+                pipe_passed_bonus_given = True
+                reward = 10000
             else:
                 reward = 1
 
             actor.learn(state_a, state_b, action, reward)
+            #####################################################
+
+
 
             display_surface.blit(bird.image, bird.rect)
 
