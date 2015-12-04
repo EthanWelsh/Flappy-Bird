@@ -417,7 +417,7 @@ def main():
     while True:
 
         runs += 1
-        print(score/runs)
+        print('{0:15}: {1:>15.4f}%'.format(int(runs), (score/runs) * 100))
 
         bird = Bird(50, int(WIN_HEIGHT / 2 - Bird.HEIGHT / 2), 2, (images['bird-wingup'], images['bird-wingdown']))
         actor.bird = bird
@@ -464,7 +464,8 @@ def main():
             pipe_lmh = int(next_pipe.bottom_pipe_end_y/(WIN_HEIGHT/3))
             state_a = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh)
 
-            action = actor.act(state_a)
+            if frame_clock % 15 == 0:
+                action = actor.act(state_a)
             #####################################################
 
             # check for collisions
@@ -500,16 +501,14 @@ def main():
             elif bird.dead:  # Hitting pipe & dying
                 reward = -1000
             elif delta_x < 0 and not pipe_passed_bonus_given:
-                print("PIPE PASSED")
                 pipe_passed_bonus_given = True
                 reward = 10000
             else:
                 reward = 1
 
-            actor.learn(state_a, state_b, action, reward)
+            if frame_clock % 15 == 0:
+                actor.learn(state_a, state_b, action, reward)
             #####################################################
-
-
 
             display_surface.blit(bird.image, bird.rect)
 
