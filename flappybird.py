@@ -335,20 +335,27 @@ class Actor:
 
         dimensions = (actions, height, width, bird_heights, pipe_heights)
 
-        self.Q = np.full(dimensions, 0, dtype=np.double)
+        self.Q = np.full(dimensions, 0, dtype=np.float32)
         self.V = np.full(dimensions, 1, dtype=np.int)
 
     def act(self, state):
         row, col, bird_lmh, pipe_lmh = self._state_index(state)
 
         # Consult the Q matrix and pick the action that has the highest
-        still = self.Q[Action.STILL, row, col, bird_lmh, pipe_lmh] + 5/self.V[Action.STILL, row, col, bird_lmh, pipe_lmh]
-        jump = self.Q[Action.JUMP, row, col, bird_lmh, pipe_lmh] + 5/self.V[Action.JUMP, row, col, bird_lmh, pipe_lmh]
+        still = self.Q[Action.STILL, row, col, bird_lmh, pipe_lmh] + float(8/self.V[Action.STILL, row, col, bird_lmh, pipe_lmh])
+        jump = self.Q[Action.JUMP, row, col, bird_lmh, pipe_lmh] + float(8/self.V[Action.JUMP, row, col, bird_lmh, pipe_lmh])
+
+        #print(still, jump)
 
         if jump > still:
             action = Action.JUMP
-        else:
+        elif still > jump:
             action = Action.STILL
+        else:
+            if self.V[Action.JUMP, row, col, bird_lmh, pipe_lmh] > self.V[Action.STILL, row, col, bird_lmh, pipe_lmh]:
+                action = Action.JUMP
+            else:
+                action = Action.STILL
 
         self.V[action, row, col, bird_lmh, pipe_lmh] += 1
 
@@ -458,7 +465,7 @@ def main():
             bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
 
             bird_lmh = int(bird.y/(WIN_HEIGHT/3))
-            pipe_lmh = int(next_pipe.bottom_pipe_end_y/(WIN_HEIGHT/3))
+            pipe_lmh = int(((next_pipe.bottom_pipe_end_y + next_pipe.top_pipe_end_y)/2)/(WIN_HEIGHT/3))
             state_a = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh)
 
             if frame_clock % 15 == 0:
@@ -493,7 +500,7 @@ def main():
 
             state_b = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh)
 
-            if bird.y < 0 or bird.y > WIN_HEIGHT:  # Reward for hitting top/bottom & dying
+            if bird.y <= 0 or bird.y > 485:  # Reward for hitting top/bottom & dying
                 reward = -5000
             elif bird.dead:  # Hitting pipe & dying
                 reward = -1000
