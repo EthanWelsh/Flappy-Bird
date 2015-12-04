@@ -332,18 +332,19 @@ class Actor:
         width = (WIN_WIDTH / Actor.step_c) * 2
         bird_heights = 3
         pipe_heights = 3
+        is_jumping = 2
 
-        dimensions = (actions, height, width, bird_heights, pipe_heights)
+        dimensions = (actions, height, width, bird_heights, pipe_heights, is_jumping)
 
         self.Q = np.full(dimensions, 0, dtype=np.float32)
         self.V = np.full(dimensions, 1, dtype=np.int)
 
     def act(self, state):
-        row, col, bird_lmh, pipe_lmh = self._state_index(state)
+        row, col, bird_lmh, pipe_lmh, is_jumping = self._state_index(state)
 
         # Consult the Q matrix and pick the action that has the highest
-        still = self.Q[Action.STILL, row, col, bird_lmh, pipe_lmh] + float(8/self.V[Action.STILL, row, col, bird_lmh, pipe_lmh])
-        jump = self.Q[Action.JUMP, row, col, bird_lmh, pipe_lmh] + float(8/self.V[Action.JUMP, row, col, bird_lmh, pipe_lmh])
+        still = self.Q[Action.STILL, row, col, bird_lmh, pipe_lmh, is_jumping] + float(8/self.V[Action.STILL, row, col, bird_lmh, pipe_lmh, is_jumping])
+        jump = self.Q[Action.JUMP, row, col, bird_lmh, pipe_lmh, is_jumping] + float(8/self.V[Action.JUMP, row, col, bird_lmh, pipe_lmh, is_jumping])
 
         #print(still, jump)
 
@@ -352,12 +353,12 @@ class Actor:
         elif still > jump:
             action = Action.STILL
         else:
-            if self.V[Action.JUMP, row, col, bird_lmh, pipe_lmh] > self.V[Action.STILL, row, col, bird_lmh, pipe_lmh]:
+            if self.V[Action.JUMP, row, col, bird_lmh, pipe_lmh, is_jumping] > self.V[Action.STILL, row, col, bird_lmh, pipe_lmh, is_jumping]:
                 action = Action.JUMP
             else:
                 action = Action.STILL
 
-        self.V[action, row, col, bird_lmh, pipe_lmh] += 1
+        self.V[action, row, col, bird_lmh, pipe_lmh, is_jumping] += 1
 
         if action == Action.JUMP:
             self.bird.jump()
@@ -366,22 +367,22 @@ class Actor:
 
     def learn(self, state_a, state_b, action, reward):
         # Consult the matrix and adjust the value at the appropriate position
-        row_a, col_a, bird_lmh_a, pipe_lmh_a = self._state_index(state_a)
-        row_b, col_b, bird_lmh_b, pipe_lmh_b = self._state_index(state_b)
+        row_a, col_a, bird_lmh_a, pipe_lmh_a, is_jumping = self._state_index(state_a)
+        row_b, col_b, bird_lmh_b, pipe_lmh_b, is_jumping = self._state_index(state_b)
 
-        max_value = max(self.Q[:, row_b, col_b, bird_lmh_b, pipe_lmh_b])
+        max_value = max(self.Q[:, row_b, col_b, bird_lmh_b, pipe_lmh_b, is_jumping])
 
-        self.Q[action, row_a, col_a, bird_lmh_a, pipe_lmh_a] = (1 - Actor.alpha) * self.Q[action, row_a, col_a, bird_lmh_a, pipe_lmh_a] + Actor.alpha * (
+        self.Q[action, row_a, col_a, bird_lmh_a, pipe_lmh_a, is_jumping] = (1 - Actor.alpha) * self.Q[action, row_a, col_a, bird_lmh_a, pipe_lmh_a, is_jumping] + Actor.alpha * (
             reward + (Actor.gamma * max_value))
 
         # perform a gaussian smoothing
         # self._guassian_smooth()
 
     def _state_index(self, state):
-        delta_x, delta_y, bird_lmh, pipe_lmh = state
+        delta_x, delta_y, bird_lmh, pipe_lmh, is_flapping = state
 
-        actions, height, width, _, _ = self.Q.shape
-        return int(height / 2) + int(delta_y / Actor.step_r), int(width / 2) + int(delta_x / Actor.step_c), bird_lmh, pipe_lmh
+        actions, height, width, _, _, _ = self.Q.shape
+        return int(height / 2) + int(delta_y / Actor.step_r), int(width / 2) + int(delta_x / Actor.step_c), bird_lmh, pipe_lmh, is_flapping
 
     def _guassian_smooth(self):
         self.Q = gaussian_filter(self.Q, sigma=2)
@@ -439,7 +440,7 @@ def main():
                 pp = PipePair(images['pipe-end'], images['pipe-body'])
                 pipes.append(pp)
 
-            next_pipe = pipes[0]
+            next_pipe = pipes[len(pipes) - 1]
 
             for e in pygame.event.get():
                 if e.type == QUIT or (e.type == KEYUP and e.key == K_ESCAPE):
@@ -461,12 +462,13 @@ def main():
 
 
             #####################################################
-            delta_x = bird.x - next_pipe.x
+            delta_x = next_pipe.x - bird.x
             bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
 
             bird_lmh = int(bird.y/(WIN_HEIGHT/3))
             pipe_lmh = int(((next_pipe.bottom_pipe_end_y + next_pipe.top_pipe_end_y)/2)/(WIN_HEIGHT/3))
-            state_a = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh)
+            is_jumping = int(bird.msec_to_climb > 0)
+            state_a = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh, is_jumping)
 
             if frame_clock % 15 == 0:
                 action = actor.act(state_a)
@@ -492,13 +494,14 @@ def main():
             bird.update()
 
             #####################################################
-            delta_x = bird.x - next_pipe.x
+            delta_x = next_pipe.x - bird.x
             bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
 
             bird_lmh = int(bird.y/(WIN_HEIGHT/3))
             pipe_lmh = int(next_pipe.bottom_pipe_end_y/(WIN_HEIGHT/3))
+            is_jumping = int(bird.msec_to_climb > 0)
 
-            state_b = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh)
+            state_b = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh, is_jumping)
 
             if bird.y <= 0 or bird.y > 485:  # Reward for hitting top/bottom & dying
                 reward = -5000
