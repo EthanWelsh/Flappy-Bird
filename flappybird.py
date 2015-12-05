@@ -173,7 +173,7 @@ class PipePair(pygame.sprite.Sprite):
             of a pipe's body.
         """
         self.x = float(WIN_WIDTH - 1)
-        self.score_counted = False
+        self.score_counted = set()
 
         self.image = pygame.Surface((PipePair.WIDTH, WIN_HEIGHT), SRCALPHA)
         self.image.convert()  # speeds up blitting
@@ -316,49 +316,54 @@ class Action:
     JUMP = 1
 
 
-class Actor:
-    step_r = 3
-    step_c = 3
+step_r = 3
+step_c = 3
 
+actions = 2
+height = (WIN_HEIGHT / step_r) * 2
+width = (WIN_WIDTH / step_c) * 2
+bird_heights = 3
+pipe_heights = 3
+is_jumping = 2
+
+dimensions = (actions, height, width, bird_heights, pipe_heights, is_jumping)
+
+Q = np.full(dimensions, 0, dtype=np.float32)
+V = np.full(dimensions, 1, dtype=np.int)
+
+
+class Actor:
     alpha = .9
     gamma = .9
 
     def __init__(self, bird):
         self.bird = bird
-        # Initialize array with 50 payoffs initially
-
-        actions = 2
-        height = (WIN_HEIGHT / Actor.step_r) * 2
-        width = (WIN_WIDTH / Actor.step_c) * 2
-        bird_heights = 3
-        pipe_heights = 3
-        is_jumping = 2
-
-        dimensions = (actions, height, width, bird_heights, pipe_heights, is_jumping)
-
-        self.Q = np.full(dimensions, 0, dtype=np.float32)
-        self.V = np.full(dimensions, 1, dtype=np.int)
+        self.last_state = None
+        self.action = None
+        self.done = False
 
     def act(self, state):
         row, col, bird_lmh, pipe_lmh, is_jumping = self._state_index(state)
 
         # Consult the Q matrix and pick the action that has the highest
-        still = self.Q[Action.STILL, row, col, bird_lmh, pipe_lmh, is_jumping] + float(8/self.V[Action.STILL, row, col, bird_lmh, pipe_lmh, is_jumping])
-        jump = self.Q[Action.JUMP, row, col, bird_lmh, pipe_lmh, is_jumping] + float(8/self.V[Action.JUMP, row, col, bird_lmh, pipe_lmh, is_jumping])
+        still = Q[Action.STILL, row, col, bird_lmh, pipe_lmh, is_jumping] + float(
+            8 / V[Action.STILL, row, col, bird_lmh, pipe_lmh, is_jumping])
+        jump = Q[Action.JUMP, row, col, bird_lmh, pipe_lmh, is_jumping] + float(
+            8 / V[Action.JUMP, row, col, bird_lmh, pipe_lmh, is_jumping])
 
-        #print(still, jump)
+        # print(still, jump)
 
         if jump > still:
             action = Action.JUMP
         elif still > jump:
             action = Action.STILL
         else:
-            if self.V[Action.JUMP, row, col, bird_lmh, pipe_lmh, is_jumping] > self.V[Action.STILL, row, col, bird_lmh, pipe_lmh, is_jumping]:
+            if V[Action.JUMP, row, col, bird_lmh, pipe_lmh, is_jumping] > V[Action.STILL, row, col, bird_lmh, pipe_lmh, is_jumping]:
                 action = Action.JUMP
             else:
                 action = Action.STILL
 
-        self.V[action, row, col, bird_lmh, pipe_lmh, is_jumping] += 1
+        V[action, row, col, bird_lmh, pipe_lmh, is_jumping] += 1
 
         if action == Action.JUMP:
             self.bird.jump()
@@ -370,9 +375,10 @@ class Actor:
         row_a, col_a, bird_lmh_a, pipe_lmh_a, is_jumping = self._state_index(state_a)
         row_b, col_b, bird_lmh_b, pipe_lmh_b, is_jumping = self._state_index(state_b)
 
-        max_value = max(self.Q[:, row_b, col_b, bird_lmh_b, pipe_lmh_b, is_jumping])
+        max_value = max(Q[:, row_b, col_b, bird_lmh_b, pipe_lmh_b, is_jumping])
 
-        self.Q[action, row_a, col_a, bird_lmh_a, pipe_lmh_a, is_jumping] = (1 - Actor.alpha) * self.Q[action, row_a, col_a, bird_lmh_a, pipe_lmh_a, is_jumping] + Actor.alpha * (
+        Q[action, row_a, col_a, bird_lmh_a, pipe_lmh_a, is_jumping] = (1 - Actor.alpha) * Q[
+            action, row_a, col_a, bird_lmh_a, pipe_lmh_a, is_jumping] + Actor.alpha * (
             reward + (Actor.gamma * max_value))
 
         # perform a gaussian smoothing
@@ -381,14 +387,18 @@ class Actor:
     def _state_index(self, state):
         delta_x, delta_y, bird_lmh, pipe_lmh, is_flapping = state
 
-        actions, height, width, _, _, _ = self.Q.shape
-        return int(height / 2) + int(delta_y / Actor.step_r), int(width / 2) + int(delta_x / Actor.step_c), bird_lmh, pipe_lmh, is_flapping
+        actions, height, width, _, _, _ = Q.shape
+
+        return int(height / 2) + int(delta_y / step_r) - 1, int(width / 2) + int(
+            delta_x / step_c) - 1, bird_lmh, pipe_lmh, is_flapping
 
     def _guassian_smooth(self):
         self.Q = gaussian_filter(self.Q, sigma=2)
 
 
 def main():
+    global Q, V
+
     """The application's entry point.
 
     If someone executes this module (instead of importing it, for
@@ -406,15 +416,12 @@ def main():
 
     # the bird stays in the same x position, so bird.x is a constant
     # center bird on screen
-
-    bird = Bird(50, int(WIN_HEIGHT / 2 - Bird.HEIGHT / 2), 2, (images['bird-wingup'], images['bird-wingdown']))
-    actor = Actor(bird)
     pipe_passed_bonus_given = True
 
     if os.path.exists('actor.pickle'):
         print('Reading actor from file.')
         with open('actor.pickle', 'rb') as handle:
-            actor.Q, actor.V = pickle.load(handle)
+            Q, V = pickle.load(handle)
 
     score = 0.0
     runs = 0.0
@@ -422,15 +429,18 @@ def main():
     while True:
 
         runs += 1
-        print('{0:15}: {1:>15.4f}%'.format(int(runs), (score/runs) * 100))
+        print('{0:15}: {1:>15.4f}%'.format(int(runs), (score / runs) * 100))
 
-        bird = Bird(50, int(WIN_HEIGHT / 2 - Bird.HEIGHT / 2), 2, (images['bird-wingup'], images['bird-wingdown']))
-        actor.bird = bird
+        number_of_birds = 100
+        birds = []
+
+        for b in range(number_of_birds):
+            x = (b * Bird.WIDTH) % 320
+            y = (WIN_HEIGHT / 3) + ((b / 10) * Bird.HEIGHT)
+            birds.append(Actor(Bird(x, y, 2, (images['bird-wingup'], images['bird-wingdown']))))
 
         pipes = deque()
         frame_clock = 0  # this counter is only incremented if the game isn't paused
-
-        last_state = None
 
         done = paused = False
         while not done:
@@ -454,35 +464,51 @@ def main():
                 elif e.type == KEYUP and e.key is K_s:
                     print('{}- Writing actor to file'.format(time.strftime("%I:%M:%S")))
                     with open('actor.pickle', 'wb') as handle:
-                        pickle.dump((actor.Q, actor.V), handle)
+                        pickle.dump((Q, V), handle)
 
                 elif e.type == MOUSEBUTTONUP or (e.type == KEYUP and e.key in (K_UP, K_RETURN, K_SPACE)):
-                    bird.jump()
+                    for actor_bird in birds:
+                        actor_bird.bird.jump()
 
             if paused:
                 continue  # don't draw anything
 
-            if last_state is None:
-                delta_x = next_pipe.x - bird.x
-                bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
+            for actor_bird in birds:
+                bird = actor_bird.bird
 
-                bird_lmh = int(bird.y/(WIN_HEIGHT/3))
-                pipe_lmh = int(next_pipe.bottom_pipe_end_y/(WIN_HEIGHT/3))
-                is_jumping = int(bird.msec_to_climb > 0)
+                if actor_bird.last_state is None:
+                    delta_x = next_pipe.x - bird.x
+                    bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
 
-                last_state = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh, is_jumping)
+                    bird_lmh = int(bird.y / (WIN_HEIGHT / 3))
+                    pipe_lmh = int(next_pipe.bottom_pipe_end_y / (WIN_HEIGHT / 3))
+                    is_jumping = int(bird.msec_to_climb > 0)
 
+                    actor_bird.last_state = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh, is_jumping)
 
             #####################################################
             if frame_clock % 15 == 0:
-                action = actor.act(last_state)
+                for actor_bird in birds:
+                    if not actor_bird.bird.dead:
+                        actor_bird.action = actor_bird.act(actor_bird.last_state)
             #####################################################
 
             # check for collisions
-            pipe_collision = any(p.collides_with(bird) for p in pipes)
-            if pipe_collision or 0 >= bird.y or bird.y >= WIN_HEIGHT - Bird.HEIGHT:
+            all_dead = True
+
+            for actor_bird in birds:
+
+                bird = actor_bird.bird
+
+                pipe_collision = any(p.collides_with(bird) for p in pipes)
+                if pipe_collision or 0 >= bird.y or bird.y >= WIN_HEIGHT - Bird.HEIGHT:
+                    bird.dead = True
+
+                if not bird.dead:
+                    all_dead = False
+
+            if all_dead:
                 done = True
-                bird.dead = True
 
             for x in (0, WIN_WIDTH / 2):
                 display_surface.blit(images['background'], (x, 0))
@@ -495,42 +521,52 @@ def main():
                 p.update()
                 display_surface.blit(p.image, p.rect)
 
-            bird.update()
+            for actor_bird in birds:
+                actor_bird.bird.update()
+                bird = actor_bird.bird
 
-            #####################################################
+                if frame_clock % 15 == 0 or bird.dead:
 
-            if frame_clock % 15 == 0 or bird.dead:
+                    delta_x = next_pipe.x - bird.x
+                    bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
 
-                delta_x = next_pipe.x - bird.x
-                bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
+                    bird_lmh = min(2, int(bird.y / (WIN_HEIGHT / 3)))
+                    pipe_lmh = min(2, int(next_pipe.bottom_pipe_end_y / (WIN_HEIGHT / 3)))
+                    is_jumping = int(bird.msec_to_climb > 0)
 
-                bird_lmh = int(bird.y/(WIN_HEIGHT/3))
-                pipe_lmh = int(next_pipe.bottom_pipe_end_y/(WIN_HEIGHT/3))
-                is_jumping = int(bird.msec_to_climb > 0)
+                    if not actor_bird.done:
+                        state = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh, is_jumping)
 
-                state = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh, is_jumping)
+                        if bird.y <= 0 or bird.y > 485:  # Reward for hitting top/bottom & dying
+                            reward = -5000
+                        elif bird.dead:  # Hitting pipe & dying
+                            reward = -1000
+                        elif delta_x < 0 and not pipe_passed_bonus_given:
+                            pipe_passed_bonus_given = True
+                            reward = 10000
+                        else:
+                            reward = 1
 
-                if bird.y <= 0 or bird.y > 485:  # Reward for hitting top/bottom & dying
-                    reward = -5000
-                elif bird.dead:  # Hitting pipe & dying
-                    reward = -1000
-                elif delta_x < 0 and not pipe_passed_bonus_given:
-                    pipe_passed_bonus_given = True
-                    reward = 10000
-                else:
-                    reward = 1
+                        actor_bird.learn(actor_bird.last_state, state, actor_bird.action, reward)
 
-                actor.learn(last_state, state, action, reward)
-                last_state = state
-            #####################################################
+                    if bird.dead:
+                        actor_bird.done = True
 
-            display_surface.blit(bird.image, bird.rect)
+                    actor_bird.last_state = state
+
+                if not bird.dead:
+                    display_surface.blit(bird.image, bird.rect)
 
             # update and display score
             for p in pipes:
-                if p.x + PipePair.WIDTH < bird.x and not p.score_counted:
-                    score += 1
-                    p.score_counted = True
+                for actor_bird in birds:
+                    bird = actor_bird.bird
+
+                    if not bird.dead:
+                        if p.x + PipePair.WIDTH < bird.x and bird not in p.score_counted:
+                            p.score_counted |= {bird}
+                            score += 1
+
 
             score_surface = score_font.render(str(score), True, (255, 255, 255))
             score_x = WIN_WIDTH / 2 - score_surface.get_width() / 2
