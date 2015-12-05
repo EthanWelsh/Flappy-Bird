@@ -430,6 +430,8 @@ def main():
         pipes = deque()
         frame_clock = 0  # this counter is only incremented if the game isn't paused
 
+        last_state = None
+
         done = paused = False
         while not done:
             clock.tick(FPS)
@@ -460,18 +462,20 @@ def main():
             if paused:
                 continue  # don't draw anything
 
+            if last_state is None:
+                delta_x = next_pipe.x - bird.x
+                bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
+
+                bird_lmh = int(bird.y/(WIN_HEIGHT/3))
+                pipe_lmh = int(next_pipe.bottom_pipe_end_y/(WIN_HEIGHT/3))
+                is_jumping = int(bird.msec_to_climb > 0)
+
+                last_state = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh, is_jumping)
+
 
             #####################################################
-            delta_x = next_pipe.x - bird.x
-            bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
-
-            bird_lmh = int(bird.y/(WIN_HEIGHT/3))
-            pipe_lmh = int(((next_pipe.bottom_pipe_end_y + next_pipe.top_pipe_end_y)/2)/(WIN_HEIGHT/3))
-            is_jumping = int(bird.msec_to_climb > 0)
-            state_a = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh, is_jumping)
-
             if frame_clock % 15 == 0:
-                action = actor.act(state_a)
+                action = actor.act(last_state)
             #####################################################
 
             # check for collisions
@@ -494,27 +498,30 @@ def main():
             bird.update()
 
             #####################################################
-            delta_x = next_pipe.x - bird.x
-            bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
 
-            bird_lmh = int(bird.y/(WIN_HEIGHT/3))
-            pipe_lmh = int(next_pipe.bottom_pipe_end_y/(WIN_HEIGHT/3))
-            is_jumping = int(bird.msec_to_climb > 0)
+            if frame_clock % 15 == 0 or bird.dead:
 
-            state_b = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh, is_jumping)
+                delta_x = next_pipe.x - bird.x
+                bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
 
-            if bird.y <= 0 or bird.y > 485:  # Reward for hitting top/bottom & dying
-                reward = -5000
-            elif bird.dead:  # Hitting pipe & dying
-                reward = -1000
-            elif delta_x < 0 and not pipe_passed_bonus_given:
-                pipe_passed_bonus_given = True
-                reward = 10000
-            else:
-                reward = 1
+                bird_lmh = int(bird.y/(WIN_HEIGHT/3))
+                pipe_lmh = int(next_pipe.bottom_pipe_end_y/(WIN_HEIGHT/3))
+                is_jumping = int(bird.msec_to_climb > 0)
 
-            if frame_clock % 15 == 0:
-                actor.learn(state_a, state_b, action, reward)
+                state = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh, is_jumping)
+
+                if bird.y <= 0 or bird.y > 485:  # Reward for hitting top/bottom & dying
+                    reward = -5000
+                elif bird.dead:  # Hitting pipe & dying
+                    reward = -1000
+                elif delta_x < 0 and not pipe_passed_bonus_given:
+                    pipe_passed_bonus_given = True
+                    reward = 10000
+                else:
+                    reward = 1
+
+                actor.learn(last_state, state, action, reward)
+                last_state = state
             #####################################################
 
             display_surface.blit(bird.image, bird.rect)
