@@ -2,14 +2,15 @@
 
 import math
 import os
-from random import randint
-from collections import deque
-import numpy as np
 import pickle
+import time
+from collections import deque
+from random import randint
+
+import numpy as np
 import pygame
 from pygame.locals import *
 from scipy.ndimage.filters import gaussian_filter
-import time
 
 FPS = 60
 ANIMATION_SPEED = 0.18  # pixels per millisecond
@@ -172,6 +173,9 @@ class PipePair(pygame.sprite.Sprite):
         pipe_body_img: The image to use to represent one horizontal slice
             of a pipe's body.
         """
+
+        self.passed = set()
+
         self.x = float(WIN_WIDTH - 1)
         self.score_counted = set()
 
@@ -184,7 +188,10 @@ class PipePair(pygame.sprite.Sprite):
              3 * PipePair.PIECE_HEIGHT) /  # 2 end pieces + 1 body piece
             PipePair.PIECE_HEIGHT  # to get number of pipe pieces
         )
+
         self.bottom_pieces = randint(1, total_pipe_body_pieces)
+        # self.bottom_pieces = 5
+
         self.top_pieces = total_pipe_body_pieces - self.bottom_pieces
 
         # bottom pipe
@@ -195,6 +202,7 @@ class PipePair(pygame.sprite.Sprite):
         self.bottom_pipe_end_y = bottom_pipe_end_y
 
         bottom_end_piece_pos = (0, bottom_pipe_end_y - PipePair.PIECE_HEIGHT)
+
         self.image.blit(pipe_end_img, bottom_end_piece_pos)
 
         # top pipe
@@ -320,13 +328,12 @@ step_r = 3
 step_c = 3
 
 actions = 2
-height = (WIN_HEIGHT / step_r) * 2
-width = (WIN_WIDTH / step_c) * 2
+height = int((WIN_HEIGHT / step_r) * 2) + 1
+width = int(((WIN_WIDTH / step_c) * 2) + PipePair.WIDTH) + 1
 bird_heights = 3
-pipe_heights = 3
 is_jumping = 2
 
-dimensions = (actions, height, width, bird_heights, pipe_heights, is_jumping)
+dimensions = (actions, height, width, bird_heights, is_jumping)
 
 Q = np.full(dimensions, 0, dtype=np.float32)
 V = np.full(dimensions, 1, dtype=np.int)
@@ -334,63 +341,71 @@ V = np.full(dimensions, 1, dtype=np.int)
 
 class Actor:
     alpha = .9
-    gamma = .9
 
     def __init__(self, bird):
         self.bird = bird
         self.last_state = None
         self.action = None
         self.done = False
+        self.next_pipe = None
 
     def act(self, state):
-        row, col, bird_lmh, pipe_lmh, is_jumping = self._state_index(state)
-
         # Consult the Q matrix and pick the action that has the highest
-        still = Q[Action.STILL, row, col, bird_lmh, pipe_lmh, is_jumping] + float(
-            8 / V[Action.STILL, row, col, bird_lmh, pipe_lmh, is_jumping])
-        jump = Q[Action.JUMP, row, col, bird_lmh, pipe_lmh, is_jumping] + float(
-            8 / V[Action.JUMP, row, col, bird_lmh, pipe_lmh, is_jumping])
 
-        # print(still, jump)
+        state = self._state_index(state)
+
+        still_state = (Action.STILL,) + state
+        jump_state = (Action.JUMP,) + state
+
+        jump = Q[jump_state] + float(8 / V[jump_state])
+        still = Q[still_state] + float(8 / V[still_state])
 
         if jump > still:
             action = Action.JUMP
         elif still > jump:
             action = Action.STILL
         else:
-            if V[Action.JUMP, row, col, bird_lmh, pipe_lmh, is_jumping] > V[Action.STILL, row, col, bird_lmh, pipe_lmh, is_jumping]:
+            if V[jump_state] > V[still_state]:
                 action = Action.JUMP
             else:
                 action = Action.STILL
 
-        V[action, row, col, bird_lmh, pipe_lmh, is_jumping] += 1
+        V[(action,) + state] += 1
 
         if action == Action.JUMP:
             self.bird.jump()
 
+        #print("Jump: {jump:10.5f} \t Still: {still:10.5f} \t - {action:10}".format(jump=jump, still=still, action={Action.STILL: 'STILL', Action.JUMP: 'JUMP'}[action]))
+
         return action
 
-    def learn(self, state_a, state_b, action, reward):
+    def learn(self, old_state, new_state, action, reward):
         # Consult the matrix and adjust the value at the appropriate position
-        row_a, col_a, bird_lmh_a, pipe_lmh_a, is_jumping = self._state_index(state_a)
-        row_b, col_b, bird_lmh_b, pipe_lmh_b, is_jumping = self._state_index(state_b)
+        old = (action,) + (self._state_index(old_state))
+        new = (self._state_index(new_state))
 
-        max_value = max(Q[:, row_b, col_b, bird_lmh_b, pipe_lmh_b, is_jumping])
+        y, x, lmh, is_jumping = new
 
-        Q[action, row_a, col_a, bird_lmh_a, pipe_lmh_a, is_jumping] = (1 - Actor.alpha) * Q[
-            action, row_a, col_a, bird_lmh_a, pipe_lmh_a, is_jumping] + Actor.alpha * (
-            reward + (Actor.gamma * max_value))
+        max_value = max(Q[:, y, x, lmh, is_jumping])
 
-        # perform a gaussian smoothing
-        # self._guassian_smooth()
+        Q[old] = (1 - Actor.alpha) * Q[old] + Actor.alpha * (reward + max_value)
 
     def _state_index(self, state):
-        delta_x, delta_y, bird_lmh, pipe_lmh, is_flapping = state
+        delta_y, delta_x, bird_lmh, is_flapping = state
 
-        actions, height, width, _, _, _ = Q.shape
+        actions, height, width, _, _ = Q.shape
 
-        return int(height / 2) + int(delta_y / step_r) - 1, int(width / 2) + int(
-            delta_x / step_c) - 1, bird_lmh, pipe_lmh, is_flapping
+        y = int((height / 2) + (delta_y / step_r) - 1)
+        x = int((width / 2) + (delta_x / step_c) - 1)
+
+        try:
+            a = Q[0, y, x, bird_lmh, is_flapping]
+        except IndexError:
+            print('STATE: ', state)
+            print('INDEXES: ', y, x, bird_lmh, is_flapping)
+            print('SHAPE: ', Q.shape[1:])
+
+        return y, x, bird_lmh, is_flapping
 
     def _guassian_smooth(self):
         self.Q = gaussian_filter(self.Q, sigma=2)
@@ -416,7 +431,6 @@ def main():
 
     # the bird stays in the same x position, so bird.x is a constant
     # center bird on screen
-    pipe_passed_bonus_given = True
 
     if os.path.exists('actor.pickle'):
         print('Reading actor from file.')
@@ -431,12 +445,13 @@ def main():
         runs += 1
         print('{0:15}: {1:>15.4f}%'.format(int(runs), (score / runs) * 100))
 
-        number_of_birds = 100
+        number_of_birds = 1000
         birds = []
 
         for b in range(number_of_birds):
-            x = (b * Bird.WIDTH) % 320
-            y = (WIN_HEIGHT / 3) + ((b / 10) * Bird.HEIGHT)
+            x = randint(Bird.WIDTH, 320)
+            y = randint(Bird.HEIGHT, WIN_HEIGHT - 100)
+
             birds.append(Actor(Bird(x, y, 2, (images['bird-wingup'], images['bird-wingdown']))))
 
         pipes = deque()
@@ -452,7 +467,11 @@ def main():
                 pp = PipePair(images['pipe-end'], images['pipe-body'])
                 pipes.append(pp)
 
-            next_pipe = pipes[len(pipes) - 1]
+            for actor_bird in birds:
+                actor_bird.next_pipe = pipes[0]
+
+                if len(pipes) > 1 and (actor_bird.next_pipe.x + PipePair.WIDTH) - actor_bird.bird.x < 0:
+                    actor_bird.next_pipe = pipes[1]
 
             for e in pygame.event.get():
                 if e.type == QUIT or (e.type == KEYUP and e.key == K_ESCAPE):
@@ -477,21 +496,20 @@ def main():
                 bird = actor_bird.bird
 
                 if actor_bird.last_state is None:
-                    delta_x = next_pipe.x - bird.x
-                    bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
+                    delta_x = (actor_bird.next_pipe.x + PipePair.WIDTH) - bird.x
+                    top_y = actor_bird.next_pipe.top_pieces * PipePair.PIECE_HEIGHT
+                    bottom_y = WIN_HEIGHT - actor_bird.next_pipe.bottom_pieces * PipePair.PIECE_HEIGHT
+                    delta_y = ((top_y + bottom_y) / 2.0) - bird.y
 
                     bird_lmh = int(bird.y / (WIN_HEIGHT / 3))
-                    pipe_lmh = int(next_pipe.bottom_pipe_end_y / (WIN_HEIGHT / 3))
                     is_jumping = int(bird.msec_to_climb > 0)
 
-                    actor_bird.last_state = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh, is_jumping)
+                    actor_bird.last_state = (delta_y, delta_x, bird_lmh, is_jumping)
 
-            #####################################################
             if frame_clock % 15 == 0:
                 for actor_bird in birds:
                     if not actor_bird.bird.dead:
                         actor_bird.action = actor_bird.act(actor_bird.last_state)
-            #####################################################
 
             # check for collisions
             all_dead = True
@@ -515,7 +533,6 @@ def main():
 
             while pipes and not pipes[0].visible:
                 pipes.popleft()
-                pipe_passed_bonus_given = False
 
             for p in pipes:
                 p.update()
@@ -527,25 +544,30 @@ def main():
 
                 if frame_clock % 15 == 0 or bird.dead:
 
-                    delta_x = next_pipe.x - bird.x
-                    bottom_delta_y = bird.y - next_pipe.bottom_pipe_end_y
+                    delta_x = (actor_bird.next_pipe.x + PipePair.WIDTH) - bird.x
+                    top_y = actor_bird.next_pipe.top_pieces * PipePair.PIECE_HEIGHT
+                    bottom_y = WIN_HEIGHT - actor_bird.next_pipe.bottom_pieces * PipePair.PIECE_HEIGHT
+                    delta_y = ((top_y + bottom_y) / 2.0) - bird.y
 
                     bird_lmh = min(2, int(bird.y / (WIN_HEIGHT / 3)))
-                    pipe_lmh = min(2, int(next_pipe.bottom_pipe_end_y / (WIN_HEIGHT / 3)))
                     is_jumping = int(bird.msec_to_climb > 0)
 
-                    if not actor_bird.done:
-                        state = (delta_x, bottom_delta_y, bird_lmh, pipe_lmh, is_jumping)
+                    distance_to_pipe = math.hypot(delta_x, delta_y)
 
-                        if bird.y <= 0 or bird.y > 485:  # Reward for hitting top/bottom & dying
-                            reward = -5000
-                        elif bird.dead:  # Hitting pipe & dying
-                            reward = -1000
-                        elif delta_x < 0 and not pipe_passed_bonus_given:
-                            pipe_passed_bonus_given = True
-                            reward = 10000
-                        else:
-                            reward = 1
+                    reward = 0.0
+
+                    if not actor_bird.done:
+                        state = (delta_y, delta_x, bird_lmh, is_jumping)
+
+                        if not bird.dead:
+                            reward += 1.0 + (15.0 / distance_to_pipe)
+                        if (pipes[0].x + PipePair.WIDTH) - bird.x < 0 and id(bird) not in pipes[0].passed:
+                            pipes[0].passed |= {id(bird)}
+                            reward += 10000.0
+                        if bird.dead:
+                            reward -= 1000.0 - (.5 * distance_to_pipe)
+                        if bird.y <= 0 or bird.y > 485:
+                            reward -= 10000.0
 
                         actor_bird.learn(actor_bird.last_state, state, actor_bird.action, reward)
 
