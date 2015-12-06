@@ -348,6 +348,7 @@ class Actor:
         self.action = None
         self.done = False
         self.next_pipe = None
+        self.pipes_passed = 0
 
     def act(self, state):
         # Consult the Q matrix and pick the action that has the highest
@@ -440,10 +441,12 @@ def main():
     score = 0.0
     runs = 0.0
 
+    max_pipes_passed = 0
+
     while True:
 
         runs += 1
-        print('{0:15}: {1:>15.4f}%'.format(int(runs), (score / runs) * 100))
+        print('{0:15}: {1:>15.4f}% \t {2:}'.format(int(runs), (score / runs) * 100, max_pipes_passed))
 
         number_of_birds = 1000
         birds = []
@@ -528,6 +531,11 @@ def main():
             if all_dead:
                 done = True
 
+                for bird_actor in birds:
+                    max_pipes_passed = max(max_pipes_passed, bird_actor.pipes_passed)
+
+
+
             for x in (0, WIN_WIDTH / 2):
                 display_surface.blit(images['background'], (x, 0))
 
@@ -562,6 +570,7 @@ def main():
                         if not bird.dead:
                             reward += 1.0 + (15.0 / distance_to_pipe)
                         if (pipes[0].x + PipePair.WIDTH) - bird.x < 0 and id(bird) not in pipes[0].passed:
+                            actor_bird.pipes_passed += 1
                             pipes[0].passed |= {id(bird)}
                             reward += 10000.0
                         if bird.dead:
@@ -589,8 +598,7 @@ def main():
                             p.score_counted |= {bird}
                             score += 1
 
-
-            score_surface = score_font.render(str(score), True, (255, 255, 255))
+            score_surface = score_font.render(str(max_pipes_passed), True, (255, 255, 255))
             score_x = WIN_WIDTH / 2 - score_surface.get_width() / 2
             display_surface.blit(score_surface, (score_x, PipePair.PIECE_HEIGHT))
 
