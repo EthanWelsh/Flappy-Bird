@@ -339,6 +339,21 @@ Q = np.full(dimensions, 0, dtype=np.float32)
 V = np.full(dimensions, 1, dtype=np.int)
 
 
+def get_state(actor, action=None):
+    delta_x = (actor.next_pipe.x + PipePair.WIDTH) - actor.bird.x
+    top_y = actor.next_pipe.top_pieces * PipePair.PIECE_HEIGHT
+    bottom_y = WIN_HEIGHT - actor.next_pipe.bottom_pieces * PipePair.PIECE_HEIGHT
+    delta_y = ((top_y + bottom_y) / 2.0) - actor.bird.y
+    bird_lmh = int(actor.bird.y / (WIN_HEIGHT / 3))
+    #pipe_lmh = actor.bird.y/((top_y + bottom_y) / 2.0)
+    is_jumping = int(actor.bird.msec_to_climb > 0)
+
+    if action:
+        return (action, delta_y, delta_x, bird_lmh, is_jumping)
+    else:
+        return (delta_y, delta_x, bird_lmh, is_jumping)
+
+
 class Actor:
     alpha = .9
 
@@ -506,18 +521,8 @@ def main():
                 continue  # don't draw anything
 
             for actor_bird in birds:
-                bird = actor_bird.bird
-
                 if actor_bird.last_state is None:
-                    delta_x = (actor_bird.next_pipe.x + PipePair.WIDTH) - bird.x
-                    top_y = actor_bird.next_pipe.top_pieces * PipePair.PIECE_HEIGHT
-                    bottom_y = WIN_HEIGHT - actor_bird.next_pipe.bottom_pieces * PipePair.PIECE_HEIGHT
-                    delta_y = ((top_y + bottom_y) / 2.0) - bird.y
-
-                    bird_lmh = int(bird.y / (WIN_HEIGHT / 3))
-                    is_jumping = int(bird.msec_to_climb > 0)
-
-                    actor_bird.last_state = (delta_y, delta_x, bird_lmh, is_jumping)
+                    actor_bird.last_state = get_state(actor_bird)
 
             if frame_clock % 15 == 0:
                 for actor_bird in birds:
@@ -561,22 +566,13 @@ def main():
                 bird = actor_bird.bird
 
                 if frame_clock % 15 == 0 or bird.dead:
-
-                    delta_x = (actor_bird.next_pipe.x + PipePair.WIDTH) - bird.x
-                    top_y = actor_bird.next_pipe.top_pieces * PipePair.PIECE_HEIGHT
-                    bottom_y = WIN_HEIGHT - actor_bird.next_pipe.bottom_pieces * PipePair.PIECE_HEIGHT
-                    delta_y = ((top_y + bottom_y) / 2.0) - bird.y
-
-                    bird_lmh = min(2, int(bird.y / (WIN_HEIGHT / 3)))
-                    is_jumping = int(bird.msec_to_climb > 0)
-
+                    state = get_state(actor_bird)
+                    delta_y, delta_x, bird_lmh, is_jumping = state
                     distance_to_pipe = math.hypot(delta_x, delta_y)
 
                     reward = 0.0
 
                     if not actor_bird.done:
-                        state = (delta_y, delta_x, bird_lmh, is_jumping)
-
                         if not bird.dead:
                             reward += 1.0 + (15.0 / distance_to_pipe)
                         if (pipes[0].x + PipePair.WIDTH) - bird.x < 0 and id(bird) not in pipes[0].passed:
