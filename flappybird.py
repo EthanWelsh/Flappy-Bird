@@ -450,11 +450,12 @@ def main():
 
     max_pipes_passed = 0
     number_of_birds = 1000
+    pipes_passed = 0
 
     while True:
 
         runs += 1
-        print('{0:15}: {1:>15.4f}% \t {2:}'.format(int(runs), ((score / runs) * 100 / number_of_birds), max_pipes_passed))
+        print('{0:15}: {1:>15.4f}% \t RUN: {3:>5} \t OVERALL: {2:>5}'.format(int(runs), ((score / runs) * 100 / number_of_birds), max_pipes_passed, pipes_passed))
         birds = []
 
         for b in range(number_of_birds):
@@ -536,10 +537,13 @@ def main():
                 if not bird.dead:
                     all_dead = False
 
+            pipes_passed = 0
+
             if all_dead:
                 done = True
 
                 for bird_actor in birds:
+                    pipes_passed = max(pipes_passed, bird_actor.pipes_passed)
                     max_pipes_passed = max(max_pipes_passed, bird_actor.pipes_passed)
 
             for x in (0, WIN_WIDTH / 2):
