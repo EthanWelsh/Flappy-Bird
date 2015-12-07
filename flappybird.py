@@ -190,7 +190,7 @@ class PipePair(pygame.sprite.Sprite):
         )
 
         self.bottom_pieces = randint(1, total_pipe_body_pieces)
-        # self.bottom_pieces = 5
+        #self.bottom_pieces = 5
 
         self.top_pieces = total_pipe_body_pieces - self.bottom_pieces
 
@@ -366,10 +366,24 @@ class Actor:
         elif still > jump:
             action = Action.STILL
         else:
-            if V[jump_state] > V[still_state]:
+            top_y = self.next_pipe.top_pieces * PipePair.PIECE_HEIGHT
+            bottom_y = WIN_HEIGHT - self.next_pipe.bottom_pieces * PipePair.PIECE_HEIGHT
+
+            bird_lmh = self.bird.y/(WIN_HEIGHT/3)
+            pipe_lmh = self.bird.y/((top_y + bottom_y) / 2.0)
+
+            if bird_lmh > pipe_lmh:
+                action = Action.STILL
+            elif bird_lmh < pipe_lmh:
                 action = Action.JUMP
             else:
                 action = Action.STILL
+
+        # Intercede on the bird's behalf to stop it from dying.
+        if (self.bird.y - Bird.CLIMB_DURATION * Bird.CLIMB_SPEED) <= 0:
+            action = Action.STILL
+        if self.bird.y + (Bird.SINK_SPEED * 15 * frames_to_msec(1)) >= WIN_HEIGHT - self.bird.HEIGHT:
+            action = Action.JUMP
 
         V[(action,) + state] += 1
 
@@ -398,13 +412,6 @@ class Actor:
 
         y = int((height / 2) + (delta_y / step_r) - 1)
         x = int((width / 2) + (delta_x / step_c) - 1)
-
-        try:
-            a = Q[0, y, x, bird_lmh, is_flapping]
-        except IndexError:
-            print('STATE: ', state)
-            print('INDEXES: ', y, x, bird_lmh, is_flapping)
-            print('SHAPE: ', Q.shape[1:])
 
         return y, x, bird_lmh, is_flapping
 
@@ -442,18 +449,20 @@ def main():
     runs = 0.0
 
     max_pipes_passed = 0
+    number_of_birds = 1000
 
     while True:
 
         runs += 1
-        print('{0:15}: {1:>15.4f}% \t {2:}'.format(int(runs), (score / runs) * 100, max_pipes_passed))
-
-        number_of_birds = 1000
+        print('{0:15}: {1:>15.4f}% \t {2:}'.format(int(runs), ((score / runs) * 100 / number_of_birds), max_pipes_passed))
         birds = []
 
         for b in range(number_of_birds):
             x = randint(Bird.WIDTH, 320)
             y = randint(Bird.HEIGHT, WIN_HEIGHT - 100)
+
+            #x = 50
+            #y = int(WIN_HEIGHT/2 - Bird.HEIGHT/2)
 
             birds.append(Actor(Bird(x, y, 2, (images['bird-wingup'], images['bird-wingdown']))))
 
@@ -518,7 +527,6 @@ def main():
             all_dead = True
 
             for actor_bird in birds:
-
                 bird = actor_bird.bird
 
                 pipe_collision = any(p.collides_with(bird) for p in pipes)
@@ -533,8 +541,6 @@ def main():
 
                 for bird_actor in birds:
                     max_pipes_passed = max(max_pipes_passed, bird_actor.pipes_passed)
-
-
 
             for x in (0, WIN_WIDTH / 2):
                 display_surface.blit(images['background'], (x, 0))
