@@ -14,7 +14,7 @@ Rewards
 -------
  - Survival: 1.0 + (15.0 / (distance_to_pipe + .1))
  - Bird Passes Pipe: 10000.0
- - Death: -1000.0 + (.5 * distance_to_pipe)
+ - Death: -(1000.0 + (.5 * distance_to_pipe))
  - Hitting Floor/Ceiling: -5000
 
 Gaussian Blur
