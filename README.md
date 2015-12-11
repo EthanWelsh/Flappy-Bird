@@ -1,4 +1,4 @@
-Playing Flappy Bird using a reinforcement learning agent! The algorithm used is Q-Learning. Code for the GUI and basic animation and physics borrowed from [here.](https://github.com/TimoWilken/flappy-bird-pygame).
+Playing Flappy Bird using a reinforcement learning agent! The algorithm used is Q-Learning. Code for the GUI and basic animation and physics borrowed from [here](https://github.com/TimoWilken/flappy-bird-pygame).
  
 State Representation
 --------------------
