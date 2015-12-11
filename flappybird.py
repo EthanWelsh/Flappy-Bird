@@ -1,5 +1,4 @@
-"""Flappy Bird, implemented using Pygame."""
-
+import argparse
 import math
 import os
 import pickle
@@ -9,16 +8,59 @@ from random import randint
 
 import numpy as np
 import pygame
+from enum import IntEnum
 from pygame.locals import *
 from scipy.ndimage.filters import gaussian_filter
 
-SKIP_FRAMES = 1
-OVERALL_SPEED = 10
+########################################################################################################################
+parser = argparse.ArgumentParser(description='Q-Learn how to play Flappy Bird')
+parser.add_argument('--actor_file', type=str, default='', help='file path to the actor file')
+parser.add_argument('--save_file', type=str, default='actor.pickle',
+                    help='file path which you would like to write to (default is actor.pickle)')
+parser.add_argument('--speed', type=int, default=1, help='game speed (default 1)')
+parser.add_argument('--skip_frames', type=int, default=1,
+                    help='only allow the bird to make decisions on multiples of this frame')
 
-NUMBER_OF_BIRDS = 1000
+parser.add_argument('--number_of_birds', type=int, default=1,
+                    help='number of birds to play flappy bird with')
+parser.add_argument('--random_start_point', type=bool, default=False,
+                    help='use random starting point for bird(s)')
+
+parser.add_argument('--alpha', type=float, default=.9, help='learning rate (0.0 < alpha < 1.0)')
+parser.add_argument('--blur_freq', type=int, default=10,
+                    help='the number of runs between each gaussian blur')
+
+parser.add_argument('--sigma', type=float, default=2.0, help='sigma for guassian blur')
+
+parser.add_argument('--bias', type=bool, default=True,
+                    help='introduce bias in the event of ties to help the bird learn faster')
+parser.add_argument('--intercede', type=bool, default=True,
+                    help='do not allow the bird to suicide on floor/ceiling')
+
+args = parser.parse_args()
+
+ACTOR_FILE = args.actor_file
+SAVE_FILE = args.save_file
+
+OVERALL_SPEED = args.speed
+SKIP_FRAMES = args.skip_frames
+
+NUMBER_OF_BIRDS = args.number_of_birds
+RANDOM_START_POINT = args.random_start_point
+
+ALPHA = args.alpha
+SIGMA = args.blur_freq
+
+BLUR_FREQ = args.blur_freq
+
+BIAS = args.bias
+INTERCEDE = args.bias
+########################################################################################################################
+
 
 FPS = 60
-ANIMATION_SPEED = 0.18 * OVERALL_SPEED # pixels per millisecond
+
+ANIMATION_SPEED = 0.18 * args.speed  # pixels per millisecond
 WIN_WIDTH = 284 * 2  # BG image size: 284x512 px; tiled twice
 WIN_HEIGHT = 512
 
@@ -195,7 +237,6 @@ class PipePair(pygame.sprite.Sprite):
         )
 
         self.bottom_pieces = randint(1, total_pipe_body_pieces)
-        #self.bottom_pieces = 5
 
         self.top_pieces = total_pipe_body_pieces - self.bottom_pieces
 
@@ -324,7 +365,7 @@ def msec_to_frames(milliseconds, fps=FPS):
     return fps * milliseconds / 1000.0
 
 
-class Action:
+class Action(IntEnum):
     STILL = 0
     JUMP = 1
 
@@ -346,22 +387,21 @@ V = np.full(dimensions, 1, dtype=np.int)
 
 
 def get_state(actor):
-
     top_y = actor.next_pipe.top_pieces * PipePair.PIECE_HEIGHT
     bottom_y = WIN_HEIGHT - actor.next_pipe.bottom_pieces * PipePair.PIECE_HEIGHT
 
     delta_y = int(((top_y + bottom_y) / 2) - actor.bird.y)
     delta_x = int((actor.next_pipe.x + PipePair.WIDTH) - actor.bird.x)
-    bird_lmh = int(actor.bird.y /(WIN_HEIGHT / 3))
-    pipe_lmh = int(((top_y + bottom_y)/2)/(WIN_HEIGHT / 3))
+    bird_lmh = int(actor.bird.y / (WIN_HEIGHT / 3))
+    pipe_lmh = int(((top_y + bottom_y) / 2) / (WIN_HEIGHT / 3))
     is_jumping = int(actor.bird.msec_to_climb > 0)
 
-    return (delta_y, delta_x, bird_lmh, pipe_lmh, is_jumping)
+    bird_lmh = min(bird_lmh, 2)
+
+    return delta_y, delta_x, bird_lmh, pipe_lmh, is_jumping
 
 
 class Actor:
-    alpha = .9
-
     def __init__(self, bird):
         self.bird = bird
         self.last_state = None
@@ -386,24 +426,31 @@ class Actor:
         elif still > jump:
             action = Action.STILL
         else:
-            top_y = self.next_pipe.top_pieces * PipePair.PIECE_HEIGHT
-            bottom_y = WIN_HEIGHT - self.next_pipe.bottom_pieces * PipePair.PIECE_HEIGHT
+            if BIAS:
+                bottom_y = WIN_HEIGHT - self.next_pipe.bottom_pieces * PipePair.PIECE_HEIGHT
+                top_y = self.next_pipe.top_pieces * PipePair.PIECE_HEIGHT
 
-            bird_lmh = int(self.bird.y/(WIN_HEIGHT/3))
-            pipe_lmh = int(((top_y + bottom_y)/2)/(WIN_HEIGHT / 3))
+                bird_lmh = int(self.bird.y / (WIN_HEIGHT / 3))
+                pipe_lmh = int(((top_y + bottom_y) / 2) / (WIN_HEIGHT / 3))
 
-            if bird_lmh > pipe_lmh:
-                action = Action.JUMP
-            elif bird_lmh < pipe_lmh:
-                action = Action.STILL
+                if bird_lmh > pipe_lmh:
+                    action = Action.JUMP
+                elif bird_lmh < pipe_lmh:
+                    action = Action.STILL
+                else:
+                    action = Action.STILL
             else:
-                action = Action.STILL
+                if V[jump_state] < V[still_state]:
+                    return Action.JUMP
+                else:
+                    return Action.STILL
 
-        # Intercede on the bird's behalf to stop it from dying.
-        if (self.bird.y - Bird.CLIMB_DURATION * Bird.CLIMB_SPEED) <= 0:
-            action = Action.STILL
-        if self.bird.y + (Bird.SINK_SPEED * SKIP_FRAMES * frames_to_msec(1)) >= WIN_HEIGHT - self.bird.HEIGHT:
-            action = Action.JUMP
+        if INTERCEDE:
+            # Intercede on the bird's behalf to stop it from dying.
+            if (self.bird.y - Bird.CLIMB_DURATION * Bird.CLIMB_SPEED) <= 0:
+                action = Action.STILL
+            if self.bird.y + (Bird.SINK_SPEED * SKIP_FRAMES * frames_to_msec(1)) >= WIN_HEIGHT - self.bird.HEIGHT:
+                action = Action.JUMP
 
         V[(action,) + state] += 1
 
@@ -420,11 +467,15 @@ class Actor:
         y, x, bird_lmh, pipe_lmh, is_jumping = new
         max_value = max(Q[:, y, x, bird_lmh, pipe_lmh, is_jumping])
 
-        Q[old] = (1 - Actor.alpha) * Q[old] + Actor.alpha * (reward + max_value)
+        Q[old] = (1 - ALPHA) * Q[old] + ALPHA * (reward + max_value)
 
-    def _state_index(self, state):
+    @staticmethod
+    def _state_index(state):
+        """
+        Provided a state in the form (delta_y, delta_x, bird_lmh, pipe_lmh, is_flapping) will return the adjusted forms
+        of these states such that they can be used as indecies.
+        """
         delta_y, delta_x, bird_lmh, pipe_lmh, is_flapping = state
-
         actions, height, width, _, _, _ = Q.shape
 
         y = int((height / 2) + (delta_y / step_r) - 1)
@@ -432,18 +483,9 @@ class Actor:
 
         return y, x, bird_lmh, pipe_lmh, is_flapping
 
-    def _guassian_smooth(self):
-        self.Q = gaussian_filter(self.Q, sigma=2)
-
 
 def main():
     global Q, V
-
-    """The application's entry point.
-
-    If someone executes this module (instead of importing it, for
-    example), this function is called.
-    """
 
     pygame.init()
 
@@ -457,10 +499,13 @@ def main():
     # the bird stays in the same x position, so bird.x is a constant
     # center bird on screen
 
-    if os.path.exists('actor.pickle'):
-        print('Reading actor from file.')
-        with open('actor.pickle', 'rb') as handle:
-            Q, V = pickle.load(handle)
+    if not ACTOR_FILE == '':
+        if os.path.exists(ACTOR_FILE):
+            print('Reading actor from file.')
+            with open(ACTOR_FILE, 'rb') as handle:
+                Q, V = pickle.load(handle)
+        else:
+            print(ACTOR_FILE, 'does not exist.')
 
     score = 0.0
     runs = 0.0
@@ -469,18 +514,22 @@ def main():
     pipes_passed = 0
 
     while True:
-
         runs += 1
 
-        print('{0:15}: {1:>15.4f}% \t RUN: {3:>5} \t OVERALL: {2:>5}'.format(int(runs), ((score / runs) * 100 / NUMBER_OF_BIRDS), max_pipes_passed, pipes_passed))
+        if runs % BLUR_FREQ == 0:
+            Q = gaussian_filter(Q, sigma=SIGMA)
+
+        print('{0:15}: AVERAGE_PIPES: {1:>15.2f} \t RUN_PIPES: {3:>5} \t OVERALL: {2:>5}'.format(int(runs), (
+            (score / runs) / NUMBER_OF_BIRDS), max_pipes_passed, pipes_passed))
         birds = []
 
         for b in range(NUMBER_OF_BIRDS):
-            x = randint(Bird.WIDTH, 320)
-            y = randint(Bird.HEIGHT, WIN_HEIGHT - 100)
+            x = 50
 
-            #x = 50
-            #y = int(WIN_HEIGHT/2 - Bird.HEIGHT/2)
+            if RANDOM_START_POINT:
+                y = randint(Bird.HEIGHT, WIN_HEIGHT - 100)
+            else:
+                y = int(WIN_HEIGHT / 2 - Bird.HEIGHT / 2)
 
             birds.append(Actor(Bird(x, y, 2, (images['bird-wingup'], images['bird-wingdown']))))
 
@@ -512,7 +561,7 @@ def main():
 
                 elif e.type == KEYUP and e.key is K_s:
                     print('{}- Writing actor to file'.format(time.strftime("%I:%M:%S")))
-                    with open('actor.pickle', 'wb') as handle:
+                    with open(SAVE_FILE, 'wb') as handle:
                         pickle.dump((Q, V), handle)
 
                 elif e.type == MOUSEBUTTONUP or (e.type == KEYUP and e.key in (K_UP, K_RETURN, K_SPACE)):
@@ -520,7 +569,7 @@ def main():
                         actor_bird.bird.jump()
 
             if paused:
-                continue  # don't draw anything
+                continue
 
             for actor_bird in birds:
                 if actor_bird.last_state is None:
@@ -620,6 +669,4 @@ def main():
 
 
 if __name__ == '__main__':
-    # If this module had been imported, __name__ would be 'flappybird'.
-    # It was executed (e.g. by double-clicking the file), so call main.
     main()
