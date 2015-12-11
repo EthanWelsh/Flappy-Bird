@@ -1,4 +1,4 @@
-Playing Flappy Bird using a reinforcement learning agent! The algorithm used is Q-Learning. Code for the GUI and basic animation and physics borrowed from [https://github.com/TimoWilken/flappy-bird-pygame](here.) In order to speed up the learning process, I found it helpful to increase the amount of birds on the screen (to change, see NUMBER_OF_BIRDS constant). Additionally, I further improved the learning process by increasing the speed at which the game plays (see OVERALL_SPEED constant).
+Playing Flappy Bird using a reinforcement learning agent! The algorithm used is Q-Learning. Code for the GUI and basic animation and physics borrowed from [here.](https://github.com/TimoWilken/flappy-bird-pygame).
  
 State Representation
 --------------------
