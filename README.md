@@ -3,11 +3,11 @@ Playing Flappy Bird using a reinforcement learning agent! The algorithm used is 
 State Representation
 --------------------
  - For my state representation, used the following:
-    + delta_x: The horizontal distance from the bird to the rightmost edge of the pipe.
-    + delta_y: The vertical distance from the bird to the gap in the pipes.
-    + is_jumping: A boolean variable that expresses if the bird is jumping or falling.
-    + bird_lmh: A value which describes which third of the screen the bird currently occupies
-    + pipe_lmh: A value which describes which third of the screen teh gap in the pipes currently occupies.
+    + *delta_x*: The horizontal distance from the bird to the rightmost edge of the pipe.
+    + *delta_y*: The vertical distance from the bird to the gap in the pipes.
+    + *is_jumping*: A boolean variable that expresses if the bird is jumping or falling.
+    + *bird_lmh*: A value which describes which third of the screen the bird currently occupies
+    + *pipe_lmh*: A value which describes which third of the screen teh gap in the pipes currently occupies.
  - Creating my state representation has been a gradual process. When I first began to implement my Q-Learning algorithm, I used only *delta_x* and *delta_y*. However, I quickly discovered that the bird's movement was highly dependent upon whether it was falling or not, so I added *is_falling* as well. Next, I was faced with the problem that the bird hit the ceiling or bottom too frequently. I found out that this was due to the bird not having enough information in its state in order to know its absolute position on the screen (delta_x and delta_y only give position relative to the pipe). In order to address this issue, I first used the bird's y position, but quickly found that this increased the size of my state space by too much. Instead, I added *bird_lmh* (credit to Justin Rushin) to tell the bird which third of the screen it was located on; this coarse granularity provided adequate enough information for the bird to avoid the top and bottom, but didn't increase the size of the state space too dramatically . Lastly, I added *pipe_lmh* to in order to tell the bird which third of the screen the next pipe opening was located on. 
     
 Rewards
@@ -25,7 +25,7 @@ Multiple Birds & Speed Up
 -------------------------
 In order to increase the speed of the learning process, I found it helpful to instantiate a number of birds that could learn concurrently using the same 'brain' (Q and V matrices).
 
-In order to further increase the learning speed, I added a OVERALL_SPEED that could modify the game to play at increased speeds (credit to Peter Mash for figuring this out). Note: due to the use of the delta_frames in the some of the physics, it is important to note that actors trained at higher speeds will not perform well at lower ones.
+In order to further increase the learning speed, I added a OVERALL_SPEED that could modify the game to play at increased speeds (credit to Peter Mash for figuring this out). Note: due to the use of the delta_frames in the some of the physics, it is important to note that actors trained at higher speeds will not perform well at lower ones. If you wish to run a bird trained on a faster brain on a lower speed, you must divide the FPS by the OVERALL_SPEED (example: if a bird is trainined on 10 overall speed, then to run it with overall speed 1, the FPS must be set to 6).
 
 Intercede & Bias
 ----------------
