@@ -631,7 +631,7 @@ def main():
                             pipes[0].passed |= {id(bird)}
                             reward += 10000.0
                         if bird.dead:
-                            reward -= 1000.0 - (.5 * distance_to_pipe)
+                            reward -= 1000.0 + (.5 * distance_to_pipe)
                         if bird.y <= 0 or bird.y > 485:
                             reward -= 10000.0
 
